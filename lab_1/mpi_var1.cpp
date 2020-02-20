@@ -4,20 +4,20 @@
 #include <stdio.h>
 #include <mpi.h>
 
-#define N 50
+#define N 10
 #define eps 0.00001
 
 int size, rank;
 
 //Count of rows to one process
 int get_rows_count_process(int curr_rank){
-        int genral = N/size;
+        int general = N/size;
         int rest = N % size;
         return general + (rank < rest ? 1 : 0);
 }
 
 //Offset from the first element in matrix
-int get_offset(int curr_rnak){
+int get_offset(int curr_rank){
         int res = 0;
         for(int i = 0; i < curr_rank; i++){
                 res += get_rows_count_process(i);
@@ -52,11 +52,11 @@ double* create_vector_b(){
 double* Matrix_by_vector(double *M, double *V)
 {
     int row_count_proc = get_rows_count_process(rank);
-    double result = (double*)calloc(row_count_proc, sizeof(double));
+    double *result = (double*)calloc(row_count_proc, sizeof(double));
     for(int i = 0; i < row_count_proc; i++){
         for(int j = 0; j < N; j++)
         {
-            result[i] += M[i][j]*V[j];
+            result[i] += M[N*i + j]*V[j];
         }
     }
     return result;
@@ -102,14 +102,14 @@ double* Minimal_Nevazki(double *A, double *b)
     while(1){
         double* AbX = Matrix_by_vector(A, X);
         double* Ax = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbX, part_sizes[rank], MPI_DOUBLE, Ax, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbX, part_sizes[rank], MPI_DOUBLE, Ax, part_sizes, position                                                                   s, MPI_DOUBLE, MPI_COMM_WORLD);
 
 
         double* Y =  differ_vectros(Ax, b);
 
         double* AbY = Matrix_by_vector(A, Y);
         double* Ay = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbY, part_sizes[rank], MPI_DOUBLE, Ay, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbY, part_sizes[rank], MPI_DOUBLE, Ay, part_sizes, position                                                                   s, MPI_DOUBLE, MPI_COMM_WORLD);
 
 
         chisl_Tau = 0.0;
@@ -129,7 +129,7 @@ double* Minimal_Nevazki(double *A, double *b)
 
         double* AbXn = Matrix_by_vector(A, Xn);
         double* AXn = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbXn, part_sizes[rank], MPI_DOUBLE, AXn, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbXn, part_sizes[rank], MPI_DOUBLE, AXn, part_sizes, positi                                                                   ons, MPI_DOUBLE, MPI_COMM_WORLD);
 
         double crit_1 = 0.0;
         double crit_2 = 0.0;
@@ -172,7 +172,7 @@ int main(int argc, char **argv) {
     std::cout << "Curr epsilon:" << eps << std::endl;
 
     double start_time = MPI_Wtime();
-    double *X =  Minimal_Nevazki(double *A, double *;
+    double *X =  Minimal_Nevazki(A, b);
     double end_time = MPI_Wtime();
 
     if(rank == 0){
@@ -189,3 +189,4 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
+
