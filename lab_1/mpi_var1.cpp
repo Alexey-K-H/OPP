@@ -102,14 +102,14 @@ double* Minimal_Nevazki(double *A, double *b)
     while(1){
         double* AbX = Matrix_by_vector(A, X);
         double* Ax = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbX, part_sizes[rank], MPI_DOUBLE, Ax, part_sizes, position                                                                   s, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbX, part_sizes[rank], MPI_DOUBLE, Ax, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
 
 
         double* Y =  differ_vectros(Ax, b);
 
         double* AbY = Matrix_by_vector(A, Y);
         double* Ay = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbY, part_sizes[rank], MPI_DOUBLE, Ay, part_sizes, position                                                                   s, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbY, part_sizes[rank], MPI_DOUBLE, Ay, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
 
 
         chisl_Tau = 0.0;
@@ -129,7 +129,7 @@ double* Minimal_Nevazki(double *A, double *b)
 
         double* AbXn = Matrix_by_vector(A, Xn);
         double* AXn = (double*)calloc(N, sizeof(double));
-        MPI_Allgatherv(AbXn, part_sizes[rank], MPI_DOUBLE, AXn, part_sizes, positi                                                                   ons, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Allgatherv(AbXn, part_sizes[rank], MPI_DOUBLE, AXn, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
 
         double crit_1 = 0.0;
         double crit_2 = 0.0;
@@ -140,6 +140,10 @@ double* Minimal_Nevazki(double *A, double *b)
         crit_1 = sqrt(crit_1);
         crit_2 = sqrt(crit_2);
         crit_module = crit_1/crit_2;
+
+        for(int i = 0; i < N; i++){
+            X[i] = Xn[i];
+        }
 
         if(crit_module < eps){
                 free(AXn);
@@ -153,9 +157,6 @@ double* Minimal_Nevazki(double *A, double *b)
                 break;
         }
 
-        for(int i = 0; i < N; i++){
-            X[i] = Xn[i];
-        }
     }
     return X;
 }
@@ -168,7 +169,7 @@ int main(int argc, char **argv) {
 
     double *A = create_matrix_A();
     double *b = create_vector_b();
-
+    if(rank == 0)
     std::cout << "Curr epsilon:" << eps << std::endl;
 
     double start_time = MPI_Wtime();
@@ -177,10 +178,12 @@ int main(int argc, char **argv) {
 
     if(rank == 0){
         for(int i = 0; i < N; i++){
-                std::cout << "X[" << i << "] = " << X[i] << std::endl;
+           printf("X[%d] = %lf\n", i, X[i]);
         }
-        printf("Time taken: %f\n", end_time - start_time);
+        //printf("Time taken: %f\n", end_time - start_time);
     }
+
+    printf("Time taken: %f\n", end_time - start_time);
 
     free(A);
     free(b);
@@ -189,4 +192,5 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
+
 
