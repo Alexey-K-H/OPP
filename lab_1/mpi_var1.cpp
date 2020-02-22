@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <mpi.h>
 
-#define N 10
+#define N 500
 #define eps 0.00001
 
 //Count of rows to one process
@@ -39,17 +39,9 @@ double* create_matrix_A(int rank, int size){
 //Create vector b
 double* create_vector_b(int rank, int size){
         double* vector = (double*)calloc(N, sizeof(double));
-
-        if(rank == 0){
                 for(int i = 0; i < N; i++){
                         vector[i] = N + 1;
                 }
-                for(int i = 1; i < size; i++){
-                        MPI_Send(vector, N, MPI_DOUBLE, i, 128, MPI_COMM_WORLD);
-                }
-        }else{
-                MPI_Recv(vector, N, MPI_DOUBLE, 0, 128, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
         return vector;
 }
 
@@ -88,16 +80,9 @@ int* get_sizes(int size){
 
 double* differ_vectros(double* a, double* b, int rank, int size){
         double* res = (double*)calloc(N, sizeof(double));
-        if(rank == 0){
                 for(int i = 0; i < N; i++){
                         res[i] = a[i] - b[i];
                 }
-                for(int i = 1; i < size; i++){
-                        MPI_Send(res, N, MPI_DOUBLE, i, 130, MPI_COMM_WORLD);
-                }
-        }else{
-                MPI_Recv(res, N, MPI_DOUBLE, 0, 130, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
         return res;
 }
 
@@ -141,22 +126,11 @@ double* Minimal_Nevazki(double *A, double *b, int rank, int size)
         chisl_Tau = 0.0;
         del_Tau = 0.0;
 
-        if(rank == 0){
                 for(int i = 0; i < N; i++){
                 chisl_Tau += Ay[i]*Y[i];
                 del_Tau += Ay[i]*Ay[i];
                 }
 
-                for(int i = 1; i < size; i++){
-                        MPI_Send(&chisl_Tau, 1, MPI_DOUBLE, i, 123, MPI_COMM_WORLD);
-                        MPI_Send(&del_Tau, 1, MPI_DOUBLE, i, 123, MPI_COMM_WORLD);
-                }
-        }else{
-                MPI_Recv(&chisl_Tau, 1, MPI_DOUBLE, 0, 123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&del_Tau, 1, MPI_DOUBLE, 0, 123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        if(rank == 0){
                 double crit_1 = 0.0;
                 double crit_2 = 0.0;
 
@@ -167,13 +141,6 @@ double* Minimal_Nevazki(double *A, double *b, int rank, int size)
                 crit_1 = sqrt(crit_1);
                 crit_2 = sqrt(crit_2);
                 crit_module = crit_1/crit_2;
-
-                for(int i = 1; i < size; i++){
-                        MPI_Send(&crit_module, 1, MPI_DOUBLE, i, 125, MPI_COMM_WORLD);
-                }
-        }else{
-                MPI_Recv(&crit_module, 1, MPI_DOUBLE, 0, 125, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
 
         if(crit_module < eps){
                 free(Y);
@@ -203,7 +170,6 @@ int main(int argc, char **argv) {
     if(rank == 0)
     std::cout << "Curr epsilon:" << eps << std::endl;
 
-
     //print_matrix(A, rank, size);
     double start = MPI_Wtime();
     double *X =  Minimal_Nevazki(A, b, rank, size);
@@ -223,6 +189,7 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
+
 
 
 
