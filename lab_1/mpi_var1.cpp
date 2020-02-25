@@ -1,10 +1,10 @@
 #include <iostream>
-#include <cmath>
 #include <stdlib.h>
 #include <stdio.h>
 #include <mpi.h>
+#include <cmath>
 
-#define N 500
+#define N 20
 #define eps 0.00001
 
 //Count of rows to one process
@@ -93,12 +93,56 @@ void print_matrix(double* matrix, int rank, int size){
                 if(rank == process){
                         for(int i = 0; i < part_size; i++){
                                 for(int j = 0; j < N; j++){
-                                        printf("%0.0f", matrix[i*N + j]);
+                                        printf("%0.0f ", matrix[i*N + j]);
                                 }
                                 printf("\n");
                         }
                 }
         }
+}
+
+double get_chisl_tau(double *Ay, double *y, int rank, int* sizes){
+        double chisl;
+        double part_chisl = 0;
+        for(int i = 0; i < sizes[rank]; i++){
+                part_chisl += Ay[i]*y[i];
+        }
+
+        MPI_Allreduce(&part_chisl, &chisl, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        return chisl;
+}
+
+double get_del_tau(double *Ay, int rank, int* sizes){
+        double del;
+        double part_del = 0;
+        for(int i = 0; i < sizes[rank]; i++){
+                part_del += Ay[i]*Ay[i];
+        }
+
+        MPI_Allreduce(&part_del, &del, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        return del;
+}
+
+double get_crit_1(double *Ax, double *b, int rank, int* sizes){
+        double crit_1;
+        double part_crit_1 = 0;
+        for(int i = 0; i < sizes[rank]; i++){
+                part_crit_1 += pow(Ax[i] - b[i], 2);
+        }
+
+        MPI_Allreduce(&part_crit_1, &crit_1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        return crit_1;
+}
+
+double get_crit_2(double *b, int rank, int* sizes){
+        double crit_2;
+        double part_crit_2 = 0;
+        for(int i = 0; i < sizes[rank]; i++){
+                part_crit_2 += pow(b[i], 2);
+        }
+
+        MPI_Allreduce(&part_crit_2, &crit_2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        return crit_2;
 }
 
 double* Minimal_Nevazki(double *A, double *b, int rank, int size)
@@ -123,24 +167,15 @@ double* Minimal_Nevazki(double *A, double *b, int rank, int size)
         double* Ay = (double*)calloc(N, sizeof(double));
         MPI_Allgatherv(AbY, part_sizes[rank], MPI_DOUBLE, Ay, part_sizes, positions, MPI_DOUBLE, MPI_COMM_WORLD);
 
-        chisl_Tau = 0.0;
-        del_Tau = 0.0;
+        chisl_Tau = get_chisl_tau(Ay, Y, rank, part_sizes);
+        del_Tau = get_del_tau(Ay, rank, part_sizes);
 
-                for(int i = 0; i < N; i++){
-                chisl_Tau += Ay[i]*Y[i];
-                del_Tau += Ay[i]*Ay[i];
-                }
+        double crit_1 = get_crit_1(Ax, b, rank, part_sizes);
+        double crit_2 = get_crit_2(b, rank, part_sizes);
 
-                double crit_1 = 0.0;
-                double crit_2 = 0.0;
-
-                for(int i = 0; i < N; i++){
-                crit_1 += pow(Ax[i] - b[i], 2);
-                crit_2 += pow(b[i], 2);
-                }
-                crit_1 = sqrt(crit_1);
-                crit_2 = sqrt(crit_2);
-                crit_module = crit_1/crit_2;
+        crit_1 = sqrt(crit_1);
+        crit_2 = sqrt(crit_2);
+        crit_module = crit_1/crit_2;
 
         if(crit_module < eps){
                 free(Y);
@@ -175,10 +210,10 @@ int main(int argc, char **argv) {
     double *X =  Minimal_Nevazki(A, b, rank, size);
     double end = MPI_Wtime();
 
-    /*if(rank == 0){
+    if(rank == 0){
      for(int i = 0; i < N; i++)
         printf("X[%d]= %lf\n", i, X[i]);
-    }*/
+    }
 
     printf("Time taken: %lf sec.\n", end - start);
 
@@ -189,7 +224,3 @@ int main(int argc, char **argv) {
     MPI_Finalize();
     return 0;
 }
-
-
-
-
