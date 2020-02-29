@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <time.h>
 
 void Matrix_by_vector(int N, double **M, const double *V, double *R)
 //N - размерность, M - матрица, V - вектор, R - реузультат
@@ -78,8 +79,10 @@ int Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
 }
 
 int main(int argc, char **argv) {
-    int N = 10;
+    int N = 26500;
     printf("Curr N:%d\n", N);
+    struct timespec start, end;
+
     double **A;
     A = (double**)malloc(N *sizeof(double*));
     for(int i = 0; i < N; ++i){
@@ -107,15 +110,21 @@ int main(int argc, char **argv) {
     Matrix_by_vector(N, A, u, b);
 
     double *X = (double*) malloc(sizeof(double) * N);//Вектор решений
-    double epsilon = pow(10, -9);//Точность
+    double epsilon = pow(10, -5);//Точность
 
+    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
     int count_steps = Minimal_Nevazki(N, A, b, X, epsilon);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+
 
     printf("Count steps:%d\n", count_steps);
+    printf("Time: %lf sec \n", end.tv_sec - start.tv_sec + 0.000000001*(end.tv_nsec - start.tv_nsec));
 
-    for(int i = 0; i < N; i++){
+
+
+    /*for(int i = 0; i < N; i++){
         printf("X[%d] = %lf   u[%d] = %lf\n",i, X[i], i, u[i]);
-    }
+    }*/
 
     for (int i = 0; i < N; ++i)
         free(A[i]);
