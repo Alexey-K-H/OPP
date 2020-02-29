@@ -1,273 +1,237 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <mpi.h>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <mpi.h>
 
-#define N 10
-#define eps 0.00001
+int chunk_size(int rank, int size, int N){
+    int basic = N/size;
+    int rest = N % size;
+    return basic + (rank < rest ? 1 : 0);
+}
 
-int get_chunk_size(int rank, int size);
-int get_offset(int rank, int size);
+int get_offset(int rank, int size, int N){
+    int offset = 0;
+    for(int i = 0; i < rank; i++){
+        offset += chunk_size(rank, size, N);
+    }
+    return offset;
+}
 
-int* arr_sizes(int size);
-int* arr_offset(int size);
+void Matrix_by_vector(int N, double **M, const double *V, double *R, int rank, int size)
+//N - размерность, M - матрица, V - вектор, R - реузультат
+{
+    for(int i = 0; i < N; i++){
+        R[i] = 0;
+    }
 
-double** create_matrix(int rank, int* sizes, int* offsets);
-double* create_vector(int rank, int* sizes, int* offsets);
+    int column_count = chunk_size(rank, size, N);
+    for(int i = 0; i < column_count; i++){
+        for(int j = 0; j < N; j++)
+        {
+            R[j] += M[i][j]*V[i];
+        }
+    }
+}
 
-void print_matrix(double** matrix, int rank, int size, int* sizes, int* offsets);
-void print_vector(double* vector, int rank, int size, int* sizes);
+int Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps, int rank, int size, int* sizes, int* offsets)
+//N - размерность, A - матрица, b - вектор свободных членов, X - вектор результат, eps - точность
+{
+    int count = 0;//Число итераций
+    int column_count = chunk_size(rank, size, N);
+    double *R_part = (double*)malloc(sizeof(double)*N);
+    double *R = (double*)malloc(sizeof(double)*column_count);
 
-double* matrix_by_vector(double** matrix, double* vector, int rank, int size, int* sizes, int* offsets);
-double* differ_vectors(double* a, double* b, int rank, int* sizes);
 
-double* minimal_nevazki(double** matrix, double* vector, int rank, int size, int* sizes, int* offsets);
+    double *Y = (double*)malloc(sizeof(double)*column_count);
+    double *Xn = (double*)malloc(sizeof(double)*column_count);//приближение
 
-double get_chisl_tau(double *Ay, double *y, int rank, int* sizes);
-double get_del_tau(double *Ay, int rank, int* sizes);
+    double crit_module;
+    double chisl_Tau;
+    double del_Tau;
 
-double get_crit_1(double *Ax, double *b, int rank, int* sizes);
-double get_crit_2(double *b, int rank, int* sizes);
+    for(int i = 0; i < column_count; i++){
+        Xn[i] = 0;//Начальное приближение делаем равным 0
+    }
 
-double* num_bu_vector(double scalar, double* vector, int rank, int* sizes);
+    do{
+        //Ax
+        Matrix_by_vector(N, A, Xn, R_part, rank, size);
+        if(size > 1){
+            MPI_Reduce_scatter(R_part, R, sizes, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }
 
-int main(int argc, char **argv){
+        if(size > 1){
+            for(int i = 0; i < column_count; i++){
+                Y[i] = R[i] - b[i];
+            }
+        }else{
+            for(int i = 0; i < column_count; i++){
+                Y[i] = R_part[i] - b[i];
+            }
+        }
+
+        Matrix_by_vector(N, A, Y, R_part, rank, size);
+        if(size > 1){
+            MPI_Reduce_scatter(R_part, R, sizes, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }
+
+        double chisl_Tau_part = 0.0;
+        double del_Tau_part = 0.0;
+
+        chisl_Tau = 0.0;
+        del_Tau = 0.0;
+
+        if(size > 1){
+            for(int i = 0; i < column_count; i++)
+            {
+                chisl_Tau_part += R[i]*Y[i];
+                del_Tau_part += R[i]*R[i];
+            }
+            MPI_Allreduce(&chisl_Tau_part, &chisl_Tau, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+            MPI_Allreduce(&del_Tau_part, &del_Tau, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }else{
+            for(int i = 0; i < column_count; i++)
+            {
+                chisl_Tau += R_part[i]*Y[i];
+                del_Tau += R_part[i]*R_part[i];
+            }
+        }
+
+
+        chisl_Tau = chisl_Tau/del_Tau;
+        for(int i = 0; i < column_count; i++){
+            X[i] = Xn[i] - chisl_Tau*Y[i];
+        }
+
+        Matrix_by_vector(N, A, X, R_part, rank, size);
+        if(size > 1){
+            MPI_Reduce_scatter(R_part, R, sizes, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }
+
+
+        double crit_1 = 0.0;
+        double crit_2 = 0.0;
+
+        double crit_1_part = 0.0;
+        double crit_2_part = 0.0;
+
+        if(size > 1){
+            for(int i = 0; i < column_count; i++){
+                crit_1_part += pow(R[i] - b[i], 2);
+                crit_2_part += pow(b[i], 2);
+            }
+            MPI_Allreduce(&crit_1_part, &crit_1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+            MPI_Allreduce(&crit_2_part, &crit_2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }else{
+            for(int i = 0; i < column_count; i++){
+                crit_1 += pow(R_part[i] - b[i], 2);
+                crit_2 += pow(b[i], 2);
+            }
+        }
+
+        crit_1 = sqrt(crit_1);
+        crit_2 = sqrt(crit_2);
+        crit_module = crit_1/crit_2;
+
+        //Обновляем приближение
+        for(int i = 0; i < column_count; i++){
+            Xn[i] = X[i];
+        }
+
+        count++;
+    }
+    while (crit_module >= eps);
+
+    free(R);
+    free(Y);
+    free(Xn);
+    free(R_part);
+    return count;
+}
+
+int main(int argc, char **argv) {
+    int N = 26500;
+    printf("Curr N:%d\n", N);
+
     int size, rank;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    int *chunk_size = arr_sizes(size);
-    int *offset_index = arr_offset(size);
+    //printf("Size:%d\n", size);
 
-    double **A = create_matrix(rank, chunk_size, offset_index);
-    double *b = create_vector(rank, chunk_size, offset_index);
+    double **A;
+    int column_count = chunk_size(rank, size, N);
+    printf("colm:%d\n", column_count);
+    int offset = get_offset(rank, size, N);
+    A = (double**)malloc(column_count * sizeof(double*));
+    for(int j = 0; j < column_count; ++j){
+        A[j] = (double*)malloc(sizeof(double)*N);
+    }
 
-    /*printf("Matrix A\n");*/
-    //print_matrix(A, rank, size, chunk_size, offset_index);
 
-    /*printf("Vector b\n");
-    print_vector(b, rank, size, chunk_size);*/
+    //Заполнение матрицы А
+    for(int j = 0; j < column_count; j++){
+        for(int i = 0; i < N; i++){
+            if(j + offset == i){
+                A[j][i] = 2.0;
+            } else{
+                A[j][i] = 1.0;
+            }
+        }
+    }
+
+    double *u = (double*)malloc(sizeof(double)*column_count);
+    for(int i = 0; i < column_count; i++){
+        u[i] = sin((2*M_1_PI*(i + offset))/N);
+    }
+
+    double *b_part = (double*)malloc(sizeof(double)*N);
+    double *b = (double*)malloc(sizeof(double)*column_count);
+
+    int* sizes = (int*)malloc(sizeof(int) * size);
+    for(int i = 0; i < size; i++){
+        sizes[i] = chunk_size(i, size, N);
+    }
+
+    int* offsets = (int*)malloc(sizeof(double) * size);
+    for(int i = 0; i < size; i++){
+        offsets[i] = get_offset(i, size, N);
+    }
+
+    Matrix_by_vector(N, A, u, b_part, rank, size);
+    if(size > 1){
+        MPI_Reduce_scatter(b_part, b, sizes, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    }
+
+    double *X = (double*) malloc(sizeof(double)*column_count);//Вектор решений
+    double epsilon = pow(10, -5);//Точность
+    int count_steps;
 
     double start = MPI_Wtime();
-    double *X =  minimal_nevazki(A, b, rank, size, chunk_size, offset_index);
+    if(size > 1){
+        count_steps = Minimal_Nevazki(N, A, b, X, epsilon, rank, size, sizes, offsets);
+    }else{
+        count_steps = Minimal_Nevazki(N, A, b_part, X, epsilon, rank, size, sizes, offsets);
+    }
     double end = MPI_Wtime();
 
-    print_vector(X, rank, size, chunk_size);
+    printf("Count steps:%d\n", count_steps);
+    printf("Time:%lf\n", end - start);
 
-    printf("Time taken: %lf sec.\n", end - start);
+    /*for(int i = 0; i < column_count; i++){
+        printf("X[%d] = %lf   u[%d] = %lf\n",i, X[i], i, u[i]);
+    }*/
 
-    free(b);
-    free(X);
-    for(int i = 0; i < N; i++){
+    for (int i = 0; i < column_count; ++i)
         free(A[i]);
-    }
     free(A);
 
+    free(u);
+    free(b);
+    free(X);
+    free(b_part);
     MPI_Finalize();
+
     return 0;
-}
-
-int get_chunk_size(int rank, int size){
-    int base_size = N/size;
-    int rest = N % size;
-    return base_size + (rank < rest ? 1 : 0);
-}
-
-int get_offset(int rank, int size){
-    int res = 0;
-    for(int i = 0; i < rank; i++){
-        res += get_chunk_size(i, size);
-    }
-    return res;
-}
-
-int* arr_sizes(int size){
-    int* sizes = (int*)calloc(size, sizeof(int));
-    for(int i = 0; i < size; i++){
-        sizes[i] = get_chunk_size(i, size);
-    }
-    return sizes;
-}
-
-int* arr_offset(int size){
-    int* offsets = (int*)calloc(size, sizeof(int));
-    for(int i = 0; i < size; i++){
-        offsets[i] = get_offset(i, size);
-    }
-    return offsets;
-}
-
-double** create_matrix(int rank, int* sizes, int* offsets){
-    int chunk_size = sizes[rank];
-    int offset = offsets[rank];
-    double** chunk = (double**)calloc(N, sizeof(double*));
-    for (int k = 0; k < N; ++k){
-        chunk[k] = (double*)calloc(chunk_size, sizeof(double));
-    }
-
-    for(int i = 0; i < N; i++){
-        for(int j = 0; j < chunk_size; j++){
-            chunk[i][j] = ((i - offset) == j)? 2 : 1;
-        }
-    }
-    return chunk;
-}
-
-double* create_vector(int rank, int* sizes, int* offsets){
-    int chunk = sizes[rank];
-    double* vector = (double*)calloc(chunk, sizeof(double));
-    for(int i = 0; i < chunk; i++){
-        vector[i] = N + 1;
-    }
-    return vector;
-}
-
-void print_matrix(double** matrix, int rank, int size, int* sizes, int* offsets){
-    int chunk = sizes[rank];
-    for(int process = 0; process < size; process++){
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(rank == process){
-            for(int i = 0; i < N; i++){
-                for(int j = 0; j < chunk; j++){
-                    printf("%0.0f ", matrix[i][j]);
-                }
-                printf("\n");
-            }
-        }
-    }
-}
-
-void print_vector(double* vector, int rank, int size, int* sizes){
-    for(int process =  0; process < size; process++){
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(rank == process){
-            for(int i = 0; i < sizes[rank]; i++){
-                printf("%0.4f\n", vector[i]);
-            }
-        }
-    }
-}
-
-double* matrix_by_vector(double** matrix, double* vector, int rank, int size, int* sizes, int* offsets){
-        double* result = (double*)calloc(sizes[rank], sizeof(double));
-        double* res = (double*)calloc(N, sizeof(double));
-
-        //print_matrix(matrix, rank, size, sizes, offsets);
-        //print_vector(vector, rank, size, sizes);
-
-        for(int num_chunk = 0; num_chunk < sizes[rank]; num_chunk++){
-                for(int i = 0; i < N; i++){
-                        res[i] += matrix[i][num_chunk]*vector[num_chunk];
-                }
-        }
-        MPI_Allreduce(res, result, sizes[rank], MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        free(res);
-        return result;
-}
-
-double* differ_vectors(double* a, double* b, int rank, int* sizes){
-        double* result = (double*)calloc(sizes[rank], sizeof(double));
-        for(int i = 0; i < sizes[rank]; i++){
-                result[i] = a[i] - b[i];
-        }
-        return result;
-}
-
-double get_chisl_tau(double *Ay, double *y, int rank, int* sizes){
-        double chisl;
-        double part_chisl = 0;
-        for(int i = 0; i < sizes[rank]; i++){
-                part_chisl += Ay[i]*y[i];
-        }
-
-        MPI_Allreduce(&part_chisl, &chisl, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        return chisl;
-}
-double get_del_tau(double *Ay, int rank, int* sizes){
-        double del;
-        double part_del = 0;
-        for(int i = 0; i < sizes[rank]; i++){
-                part_del += Ay[i]*Ay[i];
-        }
-
-        MPI_Allreduce(&part_del, &del, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        return del;
-}
-
-double get_crit_1(double *Ax, double *b, int rank, int* sizes){
-        double crit_1;
-        double part_crit_1 = 0;
-        for(int i = 0; i < sizes[rank]; i++){
-                part_crit_1 += pow(Ax[i] - b[i], 2);
-        }
-
-        MPI_Allreduce(&part_crit_1, &crit_1, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        return crit_1;
-}
-
-double get_crit_2(double *b, int rank, int* sizes){
-        double crit_2;
-        double part_crit_2 = 0;
-        for(int i = 0; i < sizes[rank]; i++){
-                part_crit_2 += pow(b[i], 2);
-        }
-
-        MPI_Allreduce(&part_crit_2, &crit_2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        return crit_2;
-}
-
-double* num_by_vector(double scalar, double* vector, int rank, int* sizes){
-        double* result = (double*)calloc(sizes[rank], sizeof(double));
-        for(int i = 0; i < sizes[rank]; i++){
-                result[i] = scalar * vector[i];
-        }
-        return result;
-}
-
-double* minimal_nevazki(double** matrix, double* vector, int rank, int size, int* sizes, int* offsets){
-        double* X = (double*)calloc(N, sizeof(double));
-        //double* X = create_vector(rank, sizes, offsets);
-
-        double crit_module;
-        double chislit_t;
-        double del_t;
-
-        while(1){
-                //Ax
-                double* Ax = matrix_by_vector(matrix, X, rank, size, sizes, offsets);
-                //print_vector(Ax, rank, size, sizes);
-
-                //Y = Ax - b
-                double* Y = differ_vectors(Ax, vector, rank, sizes);
-                //print_vector(Y, rank, size, sizes);
-
-                //Ay
-                double* Ay = matrix_by_vector(matrix, Y, rank, size, sizes, offsets);
-                //print_vector(Ay, rank, size, sizes);
-
-                chislit_t = get_chisl_tau(Ay, Y, rank, sizes);
-                del_t = get_del_tau(Ay, rank, sizes);
-
-                double crit_1 = get_crit_1(Ax, vector, rank, sizes);
-                double crit_2 = get_crit_2(vector, rank, sizes);
-
-                crit_1 = sqrt(crit_1);
-                crit_2 = sqrt(crit_2);
-
-                crit_module = crit_1/crit_2;
-
-                if(crit_module < eps){
-                        free(Ax);
-                        free(Ay);
-                        free(Y);
-                        break;
-                }
-                chislit_t = chislit_t/del_t;
-                double* ty = num_by_vector(chislit_t, Y, rank, sizes);
-                X = differ_vectors(X, ty, rank, sizes);//Update Xn
-                free(ty);
-        }
-
-        return X;
 }
