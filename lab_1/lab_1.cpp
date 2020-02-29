@@ -1,8 +1,6 @@
-#include <iostream>
 #include <cmath>
-#include <stdlib.h>
-#include <time.h>
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
 
 void Matrix_by_vector(int N, double **M, const double *V, double *R)
 //N - размерность, M - матрица, V - вектор, R - реузультат
@@ -20,9 +18,9 @@ int Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
 //N - размерность, A - матрица, b - вектор свободных членов, X - вектор результат, eps - точность
 {
     int count = 0;//Число итераций
-    double *R = new double[N];
-    double *Y = new double[N];
-    double *Xn = new double[N];//приближение
+    double *R = (double*)malloc(sizeof(double)*N);
+    double *Y = (double*)malloc(sizeof(double)*N);
+    double *Xn = (double*)malloc(sizeof(double)* N);//приближение
 
     double crit_module;
     double chisl_Tau;
@@ -73,24 +71,21 @@ int Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
     }
     while (crit_module >= eps);
 
-    delete[](R);
-    delete[](Y);
-    delete[](Xn);
+    free(R);
+    free(Y);
+    free(Xn);
     return count;
 }
 
 int main(int argc, char **argv) {
-
-    struct timespec start, end;
-
-    int N = atoi(argv[1]);
-    std::cout << "N value:" << N << std::endl;
+    int N = 10;
+    printf("Curr N:%d\n", N);
     double **A;
-    A = new double *[N];
-    for(int i = 0; i < N; ++i)
-    {
-        A[i] = new double [N];
+    A = (double**)malloc(N *sizeof(double*));
+    for(int i = 0; i < N; ++i){
+        A[i] = (double*)malloc(sizeof(double) * N);
     }
+
 
     //Заполнение матрицы А
     for(int i = 0; i < N; i++){
@@ -103,33 +98,32 @@ int main(int argc, char **argv) {
         }
     }
 
-    double u[N];
+    double *u = (double*)malloc(sizeof(double)*N);
     for(int i = 0; i < N; i++){
         u[i] = sin((2*M_1_PI*i)/N);
     }
 
-    double b[N];
+    double *b = (double*)malloc(sizeof(double) * N);
     Matrix_by_vector(N, A, u, b);
 
-    double X[N];//Вектор решений
-    double epsilon = pow(10, -5);//Точность
+    double *X = (double*) malloc(sizeof(double) * N);//Вектор решений
+    double epsilon = pow(10, -9);//Точность
 
-    std::cout << "Curr epsilon:" << epsilon << std::endl;
-
-    clock_gettime(CLOCK_MONOTONIC_RAW, &start);
     int count_steps = Minimal_Nevazki(N, A, b, X, epsilon);
-    clock_gettime(CLOCK_MONOTONIC_RAW, &end);
 
-    std::cout << "Count steps:" << count_steps << std::endl;
+    printf("Count steps:%d\n", count_steps);
 
-    printf("Time taken: %lf sec.\n", end.tv_sec - start.tv_sec + 0.000000001*(end.tv_nsec - start.tv_nsec));
     for(int i = 0; i < N; i++){
-        std::cout << "X[" << i << "] = " << X[i] << "   u[" << i << "] = " << u[i] << std::endl;
+        printf("X[%d] = %lf   u[%d] = %lf\n",i, X[i], i, u[i]);
     }
 
     for (int i = 0; i < N; ++i)
-        delete [] A[i];
-    delete [] A;
+        free(A[i]);
+    free(A);
+
+    free(u);
+    free(b);
+    free(X);
 
     return 0;
 }
