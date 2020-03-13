@@ -7,7 +7,7 @@
 void Matrix_by_vector(int N, double **M, const double *V, double *R)
 {
     int j;
-    #pragma omp parallel for private(j)
+#pragma omp parallel for private(j)
     for(int i = 0; i < N; i++){
         R[i] = 0;
         for(j = 0; j < N; j++)
@@ -34,7 +34,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
     do{
         Matrix_by_vector(N, A, Xn, R);
 
-	#pragma omp parallel for
+#pragma omp parallel for
         for(int i = 0; i < N; i++){
             Y[i] = R[i] - b[i];
         }
@@ -44,7 +44,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
         chisl_Tau = 0.0;
         del_Tau = 0.0;
 
-	#pragma omp parallel for reduction(+:chisl_Tau, del_Tau)
+#pragma omp parallel for reduction(+:chisl_Tau, del_Tau)
         for(int i = 0; i < N; i++)
         {
             chisl_Tau += R[i]*Y[i];
@@ -52,7 +52,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
         }
         chisl_Tau = chisl_Tau/del_Tau;
 
-	#pragma omp parallel for
+#pragma omp parallel for
         for(int i = 0; i < N; i++){
             X[i] = Xn[i] - chisl_Tau*Y[i];
         }
@@ -62,7 +62,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
         double crit_1 = 0.0;
         double crit_2 = 0.0;
 
-	#pragma omp parallel for reduction(+:crit_1, crit_2)
+#pragma omp parallel for reduction(+:crit_1, crit_2)
         for(int i = 0; i < N; i++){
             crit_1 += pow(R[i] - b[i], 2);
             crit_2 += pow(b[i], 2);
@@ -71,7 +71,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
         crit_2 = sqrt(crit_2);
         crit_module = crit_1/crit_2;
 
-	#pragma omp parallel for
+#pragma omp parallel for
         for(int i = 0; i < N; i++){
             Xn[i] = X[i];
         }
@@ -84,7 +84,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
 }
 
 int main(int argc, char **argv) {
-    int N = 8000;
+    int N = 10;
     double start, end;
 
     double **A;
@@ -120,9 +120,9 @@ int main(int argc, char **argv) {
 
     printf("Time: %lf sec. \n", end - start);
 
-    /*for(int i = 0; i < N; i++){
+    for(int i = 0; i < N; i++){
         printf("X[%d] = %lf   u[%d] = %lf\n",i, X[i], i, u[i]);
-    }*/
+    }
 
     for (int i = 0; i < N; ++i)
         free(A[i]);
@@ -134,4 +134,3 @@ int main(int argc, char **argv) {
 
     return 0;
 }
-
