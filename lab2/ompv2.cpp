@@ -1,12 +1,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <time.h>
 #include <omp.h>
 
-void Matrix_by_vector(int N, double **M, const double *V, double *R, int threads_count, int j)
+void Matrix_by_vector(int N, double **M, const double *V, double *R)
 {
-    #pragma omp for schedule(static, N/threads_count)
+int j;
+#pragma omp for private(j)
     for(int i = 0; i < N; i++){
         R[i] = 0;
         for(j = 0; j < N; j++)
@@ -16,86 +16,72 @@ void Matrix_by_vector(int N, double **M, const double *V, double *R, int threads
     }
 }
 
-void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps, int threads_count)
+void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps)
 {
     double *R = (double*)malloc(sizeof(double)*N);
     double *Y = (double*)malloc(sizeof(double)*N);
     double *Xn = (double*)malloc(sizeof(double)* N);
 
     double crit_module;
-    double chisl_Tau;
-    double del_Tau;
+    //double chisl_Tau;
+    //double del_Tau;
 
-    double crit_1;
-    double crit_2;
+    //double crit_1;
+    //double crit_2;
 
-    int j;
-
- #pragma omp parallel private(j) shared(crit_module, chisl_Tau, del_Tau, crit_1, crit_2)
+#pragma omp parallel
  {
-
-  #pragma omp single
-  {
-    for(int i = 0; i < N; i++){
+#pragma omp for
+  for(int i = 0; i < N; i++){
         Xn[i] = 0;
-    }
-
-    chisl_Tau = 0.0;
-    del_Tau = 0.0;
   }
 
     do{
-        Matrix_by_vector(N, A, Xn, R, threads_count, j);
+        Matrix_by_vector(N, A, Xn, R);
 
-	#pragma omp for schedule(static, N/threads_count)
+#pragma omp for
         for(int i = 0; i < N; i++){
             Y[i] = R[i] - b[i];
         }
 
-        Matrix_by_vector(N, A, Y, R, threads_count, j);
+        Matrix_by_vector(N, A, Y, R);
 
-        //chisl_Tau = 0.0;
-        //del_Tau = 0.0;
-	#pragma parallel for reduction(+:chisl_Tau, del_Tau)
+        double chisl_Tau = 0.0;
+        double del_Tau = 0.0;
+
+#pragma omp shared(chisl_Tau, del_Tau) for reduction(+:chisl_Tau, del_Tau)
         for(int i = 0; i < N; i++)
         {
             chisl_Tau += R[i]*Y[i];
             del_Tau += R[i]*R[i];
         }
 
-	#pragma omp single
-        	chisl_Tau = chisl_Tau/del_Tau;
+        chisl_Tau = chisl_Tau/del_Tau;
 
-	#pragma omp for schedule(static, N/threads_count)
-        	for(int i = 0; i < N; i++){
-            		X[i] = Xn[i] - chisl_Tau*Y[i];
-        	}
+#pragma omp for
+                for(int i = 0; i < N; i++){
+                        X[i] = Xn[i] - chisl_Tau*Y[i];
+                }
 
-        Matrix_by_vector(N, A, X, R, threads_count, j);
+        Matrix_by_vector(N, A, X, R);
 
-	#pragma omp single
-	{
-        	crit_1 = 0.0;
-        	crit_2 = 0.0;
-	}
+        double crit_1 = 0.0;
+        double crit_2 = 0.0;
 
-	#pragma parallel for reduction(+:crit_1, crit_2)
-        	for(int i = 0; i < N; i++){
-            		crit_1 += pow(R[i] - b[i], 2);
-            		crit_2 += pow(b[i], 2);
-        	}
+#pragma omp shared(crit_1, crit_2) for reduction(+:crit_1, crit_2)
+                for(int i = 0; i < N; i++){
+                        crit_1 += pow(R[i] - b[i], 2);
+                        crit_2 += pow(b[i], 2);
+                }
 
-	#pragma omp single
-	{
-        	crit_1 = sqrt(crit_1);
-        	crit_2 = sqrt(crit_2);
-        	crit_module = crit_1/crit_2;
-	}
+        crit_1 = sqrt(crit_1);
+        crit_2 = sqrt(crit_2);
+        crit_module = crit_1/crit_2;
 
-	#pragma omp for schedule(static, N/threads_count)
-        	for(int i = 0; i < N; i++){
-            		Xn[i] = X[i];
-        	}
+#pragma omp for
+                for(int i = 0; i < N; i++){
+                        Xn[i] = X[i];
+                }
     }
     while (crit_module >= eps);
  }
@@ -105,8 +91,7 @@ void Minimal_Nevazki(int N, double **A, const double *b, double *X, double eps, 
 }
 
 int main(int argc, char **argv) {
-    int N = 8000;
-    int threads_count = omp_get_num_threads();
+    int N = 10;
 
     double start, end;
 
@@ -131,22 +116,25 @@ int main(int argc, char **argv) {
         u[i] = sin(2*M_1_PI*i);
     }
 
-    int j;
     double *b = (double*)malloc(sizeof(double) * N);
-    Matrix_by_vector(N, A, u, b, threads_count, j);
+
+#pragma omp parallel
+{
+    Matrix_by_vector(N, A, u, b);
+}
 
     double *X = (double*) malloc(sizeof(double) * N);
     double epsilon = pow(10, -5);
 
     start = omp_get_wtime();
-    Minimal_Nevazki(N, A, b, X, epsilon, threads_count);
+    Minimal_Nevazki(N, A, b, X, epsilon);
     end = omp_get_wtime();
 
     printf("Time: %lf sec. \n", end - start);
 
-    /*for(int i = 0; i < N; i++){
-        printf("X[%d] = %lf   u[%d] = %lf\n",i, X[i], i, u[i]);
-    }*/
+    for(int i = 0; i < N; i++){
+        printf("X[%d] = %lf  u[%d] = %lf\n",i, X[i], i, u[i]);
+    }
 
     for (int i = 0; i < N; ++i)
         free(A[i]);
@@ -158,4 +146,3 @@ int main(int argc, char **argv) {
 
     return 0;
 }
-
