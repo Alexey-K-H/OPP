@@ -4,31 +4,35 @@
 #include <math.h>
 #include <mpi.h>
 
-int iterCounter = 3;
-int L = 50;
+int iterCounter = 4;
+int L = 500;
 
-typedef struct TaskList{
+/*typedef struct TaskList{
     int repeatNum;
-}TaskList;
+}TaskList;*/
 
-TaskList *tl;
+//TaskList *tl;
+int *tl;
+
 int nextPosition;
 
 double globalRes = 0;
-int tasksCount = 20;
+int tasksCount = 10000;
 int processTasksCount;
+int iterTaskCount;
+
+int size;
+int rank;
 
 pthread_t threads[2];
 pthread_mutex_t mutex;
 
-void initList(TaskList *taskList, int procTaskCount, int rank, int size, int iterCount);
-void createThreads(int rank, int size, int procTaskNum);
+void initList(int *taskList, int procTaskCount, int iterCount);
+void createThreads();
 void* doTasks(void*);
-void* sendTask();
+void* sendTask(void*);
 
 int main(int argc, char** argv) {
-    int size;
-    int rank;
 
     int provided;
     double start;
@@ -38,14 +42,26 @@ int main(int argc, char** argv) {
     MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
+    if(provided != MPI_THREAD_MULTIPLE){
+	printf("Cannot get needed provided level!\n");
+    }
 
     pthread_mutex_init(&mutex, NULL);
     processTasksCount = tasksCount / size;
 
-    tl = (TaskList*)malloc(processTasksCount*(sizeof(TaskList)));
+    if (rank < tasksCount % size) {
+        processTasksCount = tasksCount / size + 1;
+    }
+    else {
+        processTasksCount = tasksCount / size;
+    }
+
+    //tl = (TaskList*)malloc(processTasksCount*(sizeof(TaskList)));
+    tl = (int*)malloc(processTasksCount * sizeof(int));
 
     start = MPI_Wtime();
-    createThreads(rank, size, processTasksCount);
+    createThreads();
     end = MPI_Wtime();
 
     double time = end - start;
@@ -53,7 +69,7 @@ int main(int argc, char** argv) {
     MPI_Reduce(&time, &generalTime, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if(rank == 0){
-        printf("Tasks:%d  Time:%f\n", tasksCount, generalTime);
+        printf("Time:%f\n", generalTime);
     }
 
     pthread_mutex_destroy(&mutex);
@@ -63,22 +79,23 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void createThreads(int rank, int size, int procTaskNum){
+void createThreads(){
     pthread_attr_t attr;
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-    int args[3] = {rank, size, procTaskNum};
-    pthread_create(&threads[0], &attr, doTasks, &args);
+    pthread_create(&threads[0], &attr, doTasks, NULL);
     pthread_create(&threads[1], &attr, sendTask, NULL);
 
     pthread_attr_destroy(&attr);
+
+    pthread_join(threads[0], NULL);
+    pthread_join(threads[1], NULL);
 }
 
-void initList(TaskList *taskList, int procTaskCount, int rank, int size, int iterCount){
+void initList(int *taskList, int procTaskCount, int iterCount){
     for(int i = 0; i < procTaskCount; i++){
-        taskList[i].repeatNum = abs(50 - i%100)*abs(rank - (iterCount % size))*L;
+        taskList[i] = abs(50 - i%100)*abs(rank - (iterCount % size))*L;
     }
 }
 
@@ -92,63 +109,68 @@ void* doTasks(void* args){
     double time_m;
     double time_n;
 
-    int request;//Запрос на дополнительные задачи
+    MPI_Status st;
+
+    int request;
 
     int iterationCompletedTasksNum;
 
-    int procTaskNum = ((int*)args)[2];
-    int rank = ((int*)args)[0];
-    int size = ((int*)args)[1];
-
     while (currListNum != iterCounter){
-        initList(tl, procTaskNum, rank, size, currListNum);
+        //printf("Initialize taskList#%d\n", currListNum);
+        initList(tl, processTasksCount, currListNum);
         iterationCompletedTasksNum = 0;
         nextPosition = 0;
         start_iteration = MPI_Wtime();
+        iterTaskCount = processTasksCount;
 
-        while(procTaskNum != 0){
-            procTaskNum--;
-
+        while(iterTaskCount != 0){
             pthread_mutex_lock(&mutex);
+            int weight = tl[nextPosition];
+            nextPosition++;
+            iterTaskCount--;
+            pthread_mutex_unlock(&mutex);
 
-            for(int i = 0; i < tl[nextPosition].repeatNum; i++){
+            for(int i = 0; i < weight; i++){
                 globalRes += sin(i);
             }
 
-            pthread_mutex_unlock(&mutex);
             iterationCompletedTasksNum++;
-            nextPosition++;
         }
+        //printf("Process#%d finished his own tasks.\n", rank);
 
-        //Проходимся по всем процессам и берем задачи от них, если возможно
         for(int i = 0; i < size; i++){
             request = 1;
 
-            while (1){
-                //Отправляем процессам запрос о том, что нужны дополнительные задачи
-                MPI_Send(&request, 1, MPI_INT, (rank + i) % size, 0, MPI_COMM_WORLD);
+            if((rank + i) % size != rank){
+                    //printf("Rank#%d send request to process#%d\n", rank, (rank + i)%size);
+                    MPI_Send(&request, 1, MPI_INT, (rank + i) % size, 0, MPI_COMM_WORLD);
 
-                //Ответ от процессов, есть ли дополнительные свободные задачи
-                int response;
+                    int response;
 
-                MPI_Recv(&response, 1, MPI_INT, (rank + i) % size, 1, MPI_COMM_WORLD, 0);
+                    //printf("Rank#%d waiting for response from process#%d\n", rank, (rank + i) % size);
+                    MPI_Recv(&response, 1, MPI_INT, (rank + i) % size, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    //printf("Rank#%d get response:%d from process#%d\n", rank, response, (rank + i) % size);
 
-                //Если дополнительных задач нет, то завершаем работу цилка и опрашиваем другой процесс
-                if(response == -1 || response == 0) break;
-
-                //Иначе выполняется дополнительная задача от другого процесса
-                for(int j = 0; j < response; j++){
-                    globalRes += sin(j);
-                }
-                iterationCompletedTasksNum++;
+                    if(response != -1){
+                	int *response_tasks = (int*)malloc(sizeof(int)*response);
+            		MPI_Recv(response_tasks, response, MPI_INT, (rank + i) % size, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                	
+                	for(int j = 0; j < response; j++){
+                    	    for(int k = 0; k < response_tasks[j]; k++){
+                    		globalRes += sin(k);
+                    	    }
+                    	    iterationCompletedTasksNum++;
+                	}
+                	
+                	free(response_tasks);
+                    }
             }
         }
-
+        //printf("Process#%d finished search for tasks on this iteration\n", rank);
         end_iteration = MPI_Wtime();
         double iterationTimeProc =  end_iteration - start_iteration;
         printf("Process#%d | TasksIterationCount:%d | IterationTime:%f\n", rank, iterationCompletedTasksNum, iterationTimeProc);
 
-        //Ищем time_m и time_n
         MPI_Allreduce(&iterationTimeProc, &time_m, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
         MPI_Allreduce(&iterationTimeProc, &time_n, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
 
@@ -163,37 +185,53 @@ void* doTasks(void* args){
         MPI_Allreduce(&globalRes, &globalResIteration, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         printf("GlobalRes iteration:%.3f\n", globalResIteration);
         currListNum++;
+        MPI_Barrier(MPI_COMM_WORLD);
     }
+
+    request = 0;
+    MPI_Send(&request, 1, MPI_INT, rank, 0, MPI_COMM_WORLD);
 
     return NULL;
 }
 
-void* sendTask(){
+void* sendTask(void* args){
     MPI_Status status;
     int request;
     int response;
 
     while(1){
+        //printf("Rank#%d waiting for some request...\n", rank);
         MPI_Recv(&request, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+        //printf("Rank#%d get request from process#%d\n", rank, status.MPI_SOURCE);
         if(request == 0)break;
 
-        int maxLeftTasks;//Наибольшее количество свободных задач среди процессов
+        pthread_mutex_lock(&mutex);
+        int* sendTasks;
 
-        MPI_Allreduce(&processTasksCount, &maxLeftTasks, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-        if(processTasksCount == maxLeftTasks && processTasksCount > 3){
-            pthread_mutex_lock(&mutex);
-            response = tl[nextPosition].repeatNum;
-            nextPosition++;
+        if(iterTaskCount > 100){
+            response = 50;
+
+            sendTasks = (int*)malloc(sizeof(int)*response);
+            for(int i = 0; i < response; i++){
+        	sendTasks[i] = tl[nextPosition];
+        	nextPosition++;
+        	iterTaskCount--;
+            }
         }
-        else if(processTasksCount == maxLeftTasks && processTasksCount == 0){
+        else {
             response = -1;
-        }
-        else if(processTasksCount == maxLeftTasks && processTasksCount <= 3){
-            response = 0;
         }
 
         pthread_mutex_unlock(&mutex);
+
+        //printf("Rank#%d response is:%d\n",rank, response);
         MPI_Send(&response, 1, MPI_INT, status.MPI_SOURCE, 1, MPI_COMM_WORLD);
+
+        if(response > 0){
+    	    MPI_Send(sendTasks, response, MPI_INT, status.MPI_SOURCE, 2, MPI_COMM_WORLD);
+    	    free(sendTasks);
+    	}
+        //printf("Rank#%d send response %d to process#%d\n", rank, response, status.MPI_SOURCE);
     }
 
     return NULL;
